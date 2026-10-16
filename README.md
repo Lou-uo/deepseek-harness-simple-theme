@@ -1,10 +1,14 @@
-# DeepSeek Harness 壁纸与界面透明度插件
+<div align="center">
 
-**给 DeepSeek Harness（DSH）的 Web GUI / 官方桌面客户端铺一张壁纸，并把界面调成你喜欢的通透程度。**
+<h1>DeepSeek Harness 壁纸与界面透明度插件</h1>
 
-不改一行 DSH 源码、不用 `pnpm build`、不联网、不装依赖。把一个文件夹塞进 profile 的 `node_modules`，重启客户端，界面就变了。
+<p><strong>给 DeepSeek Harness（DSH）的 Web GUI / 官方桌面客户端铺一张壁纸，并把界面调成你喜欢的通透程度。</strong></p>
 
-![GitHub stars](https://img.shields.io/github/stars/Lou-uo/deepseek-harness-simple-theme?style=flat-square&label=stars)![GitHub forks](https://img.shields.io/github/forks/Lou-uo/deepseek-harness-simple-theme?style=flat-square&label=forks)![License](https://img.shields.io/badge/license-MIT-informational?style=flat-square)![DSH](https://img.shields.io/badge/DSH-0.1.0--rc.5-blue?style=flat-square)![Platform](https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square)
+<p>不改一行 DSH 源码、不用 <code>pnpm build</code>、不联网、不装依赖。<br>把一个文件夹塞进 profile 的 <code>node_modules</code>，重启客户端，界面就变了。</p>
+
+<p><a href="https://github.com/Lou-uo/deepseek-harness-simple-theme/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Lou-uo/deepseek-harness-simple-theme?style=flat&amp;label=stars"></a> <a href="https://github.com/Lou-uo/deepseek-harness-simple-theme/network/members"><img alt="GitHub forks" src="https://img.shields.io/github/forks/Lou-uo/deepseek-harness-simple-theme?style=flat&amp;label=forks"></a> <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-informational?style=flat"></a> <a href="https://github.com/deepseek-ai/deepseek-harness"><img alt="DSH" src="https://img.shields.io/badge/DSH-0.1.0--rc.5-4C6EF5?style=flat"></a> <a href="https://github.com/deepseek-ai/deepseek-harness"><img alt="Platform" src="https://img.shields.io/badge/platform-Windows-0078D4?style=flat"></a></p>
+
+</div>
 
 <!-- TODO: 若做了英文版，补一个 [English](./README.en.md) 链接 -->
 
