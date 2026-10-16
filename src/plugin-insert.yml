@@ -1,0 +1,9 @@
+# Loader insert for the wallpaper plugin, applied in a profile's user patch layer
+# (the app-managed `cordis.patch.yml` of a DSH profile). Installers append this
+# block automatically; it is kept here for manual installs and inspection.
+#
+# `id` must stay unique across the whole loader tree; `name` must resolve from the
+# profile directory (i.e. the package lives in <profile>/node_modules/dsh-web-bg).
+- insert:
+    - id: web-bg
+      name: dsh-web-bg

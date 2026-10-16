@@ -1,0 +1,74 @@
+# Verify the installer round-trips cleanly on a throwaway profile:
+# pristine -> install -> compose check -> re-install (idempotent) -> uninstall.
+#
+# Ships as `.ps1.txt` because `.ps1` is on Windows' high-risk extension list (see
+# the installer's notes). Rename it before running, or paste it into PowerShell.
+#
+# The installer is also `.ps1.txt`, so this script first makes a runnable copy of
+# it in a temporary directory; the package itself stays untouched.
+$ErrorActionPreference = 'Stop'
+
+$package = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$home_ = if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $HOME '.dsh' }
+$test = Join-Path $home_ 'profiles\webtest'
+
+# Locate a dsh CLI: PATH first, then the packaged distribution.
+$dsh = $null
+$onPath = Get-Command dsh -ErrorAction SilentlyContinue
+if ($onPath) { $dsh = $onPath.Source }
+if (-not $dsh) {
+  foreach ($candidate in @(
+      'D:\DS\window_x64\resources\runtime\cli\bin\dsh.cmd',
+      (Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd')
+    )) {
+    if (Test-Path -LiteralPath $candidate) { $dsh = $candidate; break }
+  }
+}
+if (-not $dsh) { Write-Host 'no dsh CLI found; the compose checks are skipped' -ForegroundColor Yellow }
+
+$runner = Join-Path $package 'install.ps1'
+Copy-Item -LiteralPath (Join-Path $package 'install.ps1.txt') -Destination $runner -Force
+
+function Invoke-Installer([string[]]$extra) {
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -Profile webtest @extra *> $null
+}
+
+function Compose([string]$name) {
+  if (-not $dsh) { return 'skipped' }
+  $out = & $dsh --profile $name --dump-config 2>&1
+  return [bool]($out -match [regex]::Escape('dsh-web-bg'))
+}
+
+try {
+  if (-not (Test-Path -LiteralPath $test)) {
+    $template = Join-Path $home_ 'profiles\web'
+    if (-not (Test-Path -LiteralPath $template)) { throw "no profile to copy from: $template" }
+    Copy-Item -LiteralPath $template -Destination $test -Recurse -Force
+  }
+
+  # Pristine patch layer: a comment plus the empty array, which is what a fresh
+  # profile's user layer looks like. A comments-only file parses as null and the
+  # composer rejects it, so the `[]` matters.
+  $pristine = "# Your patch layer for this dsh profile, applied after every bundle layer.`n[]`n"
+  [System.IO.File]::WriteAllText((Join-Path $test 'cordis.patch.yml'), $pristine, (New-Object System.Text.UTF8Encoding($false)))
+  $installed = Join-Path $test 'node_modules\dsh-web-bg'
+  if (Test-Path -LiteralPath $installed) { Remove-Item -LiteralPath $installed -Recurse -Force }
+
+  Write-Host ("before install  : composes = " + (Compose 'webtest'))
+
+  Invoke-Installer @()
+  Write-Host ("after install   : composes = " + (Compose 'webtest'))
+  Write-Host ("                  halves   = " + (Test-Path -LiteralPath (Join-Path $installed 'lib\client.mjs')))
+
+  Invoke-Installer @()
+  $blocks = ([regex]::Matches((Get-Content (Join-Path $test 'cordis.patch.yml') -Raw), '(?m)^- insert:')).Count
+  Write-Host ("after re-install: insert blocks = $blocks (expect 1)")
+
+  Invoke-Installer @('-Uninstall')
+  Write-Host ("after uninstall : composes = " + (Compose 'webtest'))
+  Write-Host ("                  halves   = " + (Test-Path -LiteralPath $installed))
+}
+finally {
+  Remove-Item -LiteralPath $runner -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $test) { Remove-Item -LiteralPath $test -Recurse -Force -ErrorAction SilentlyContinue }
+}

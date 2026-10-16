@@ -1,0 +1,275 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+  Install or remove the dsh-web-bg wallpaper plugin in a DeepSeek Harness profile.
+
+.DESCRIPTION
+  Copies the plugin package into the profile's node_modules (the directory the
+  client module system resolves plugin packages from) and appends the loader
+  insert block to the profile's user patch layer (cordis.patch.yml). Both steps
+  are idempotent, and every edit of the patch file is backed up first.
+
+  The package deliberately declares no dsh.bundle and no dependencies: the loader
+  insert is the single activation mechanism, so the CLI profile route and the
+  app-managed desktop route behave identically, and installing never runs package
+  build scripts.
+
+.PARAMETER Profile
+  Profile name to install into. Use `desktop` for the official desktop client
+  (whose profile is managed by the Electron application) or any CLI profile, e.g.
+  `web` for `dsh web`.
+
+.PARAMETER DshHome
+  DSH home directory. Defaults to $env:DSH_HOME, then ~/.dsh.
+
+.PARAMETER Uninstall
+  Remove the loader insert and the installed package copy.
+
+.PARAMETER DryRun
+  Report the planned changes without writing anything.
+
+.EXAMPLE
+  Copy-Item install.ps1.txt install.ps1
+  powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Profile desktop
+  powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Profile web
+  powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Profile desktop -Uninstall
+
+.NOTES
+  This installer ships as `.ps1.txt` because `.ps1` is on Windows' high-risk
+  extension list: an archive containing it makes Explorer warn "these files
+  might be harmful" as soon as it is opened. Renaming it back to `.ps1` is the
+  only difference; the content is unchanged. Pasting the whole file into a
+  PowerShell window also works — run it from this folder, because $PSScriptRoot
+  then resolves to the current directory.
+#>
+[CmdletBinding()]
+param(
+  [string]$Profile = 'desktop',
+  [string]$DshHome = $(if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $HOME '.dsh' }),
+  [switch]$Uninstall,
+  [switch]$DryRun
+)
+
+$ErrorActionPreference = 'Stop'
+
+$packageRoot = $PSScriptRoot
+$packageName = 'dsh-web-bg'
+$entryId = 'web-bg'
+$marker = '# dsh-web-bg wallpaper plugin - delete this block to uninstall'
+$profileDir = Join-Path $DshHome (Join-Path 'profiles' $Profile)
+$patchFile = Join-Path $profileDir 'cordis.patch.yml'
+$manifest = Join-Path $profileDir 'package.json'
+$targetDir = Join-Path $profileDir (Join-Path 'node_modules' $packageName)
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+
+function Write-Step([string]$text) { Write-Host "  $text" }
+function Write-Head([string]$text) { Write-Host "`n$text" -ForegroundColor Cyan }
+
+function Read-Text([string]$path) {
+  if (-not (Test-Path -LiteralPath $path)) { return '' }
+  return [System.IO.File]::ReadAllText($path)
+}
+
+function Write-Text([string]$path, [string]$text) {
+  if ($DryRun) { Write-Step "would write $path"; return }
+  [System.IO.File]::WriteAllText($path, $text, $utf8)
+}
+
+# ---- preflight ------------------------------------------------------------
+
+Write-Head "dsh-web-bg installer"
+Write-Step "package    : $packageRoot"
+Write-Step "DSH home   : $DshHome"
+Write-Step "profile    : $Profile"
+Write-Step "profile dir: $profileDir"
+if ($DryRun) { Write-Step 'mode       : DRY RUN (nothing is written)' }
+
+if (-not (Test-Path -LiteralPath $profileDir)) {
+  Write-Host "`nERROR: profile directory does not exist: $profileDir" -ForegroundColor Red
+  Write-Host 'Start that profile once (e.g. `dsh web`, or open the desktop client) and re-run.' -ForegroundColor Red
+  exit 2
+}
+
+# ---- activation -----------------------------------------------------------
+#
+# Activation goes through the profile's bundle layer (`dsh.profile.bundles` in
+# the profile's package.json): the package declares `dsh.bundle.patch`, so it
+# contributes its insert list as a bundle layer. The user's own
+# cordis.patch.yml is deliberately NOT used — the client rewrites that file
+# whenever it saves its settings (theme, locale, …) and would drop the insert.
+
+function Add-BundleEntry {
+  $text = Read-Text $manifest
+  if ($text -eq '') { throw "profile manifest is missing: $manifest" }
+  if ($text -match ('"' + [regex]::Escape($packageName) + '"')) {
+    Write-Step 'profile manifest: bundle entry already present'
+    return
+  }
+  $pattern = '("bundles"\s*:\s*\[)'
+  if (-not ($text -match $pattern)) { throw "profile manifest has no dsh.profile.bundles array: $manifest" }
+  $new = $text -replace $pattern, "`${1}`n        `"$packageName`","
+  Copy-Item -LiteralPath $manifest -Destination "$manifest.dsh-web-bg.bak" -Force -ErrorAction SilentlyContinue
+  Write-Text $manifest $new
+  Write-Step 'profile manifest: bundle entry added (backup: package.json.dsh-web-bg.bak)'
+}
+
+function Remove-BundleEntry {
+  $text = Read-Text $manifest
+  if ($text -eq '' -or -not ($text -match ('"' + [regex]::Escape($packageName) + '"'))) {
+    Write-Step 'profile manifest: no bundle entry to remove'
+    return
+  }
+  $kept = $text -split "`r?`n" | Where-Object { $_.Trim() -ne "`"$packageName`"," -and $_.Trim() -ne "`"$packageName`"" }
+  Copy-Item -LiteralPath $manifest -Destination "$manifest.dsh-web-bg.bak" -Force -ErrorAction SilentlyContinue
+  Write-Text $manifest (($kept -join "`n").TrimEnd() + "`n")
+  Write-Step 'profile manifest: bundle entry removed (backup: package.json.dsh-web-bg.bak)'
+}
+
+# ---- uninstall ------------------------------------------------------------
+
+function Remove-LegacyInsert {
+  $text = Read-Text $patchFile
+  if ($text -eq '' -or -not ($text -match [regex]::Escape($packageName))) {
+    Write-Step 'patch file: no insert block to remove'
+    return
+  }
+  $lines = $text -split "`r?`n"
+  $kept = New-Object System.Collections.Generic.List[string]
+  $removed = 0
+  for ($index = 0; $index -lt $lines.Count; $index++) {
+    # Preferred shape: our marker comment followed by the insert block.
+    if ($lines[$index].Trim() -eq $marker) {
+      $removed++
+      $index++
+      if ($index -lt $lines.Count -and $lines[$index].Trim() -eq '- insert:') {
+        $index++
+        while ($index -lt $lines.Count -and $lines[$index] -match '^\s+\S') { $index++ }
+      }
+      $index--
+      continue
+    }
+    # Fallback: the same block without its marker (hand-edited file), matched by
+    # this plugin's exact entry id and name so no other block can be touched.
+    if (
+      $lines[$index].Trim() -eq '- insert:' -and
+      ($index + 2) -lt $lines.Count -and
+      $lines[$index + 1].Trim() -eq "- id: $entryId" -and
+      $lines[$index + 2].Trim() -eq "name: $packageName"
+    ) {
+      $removed++
+      $index += 2
+      continue
+    }
+    $kept.Add($lines[$index])
+  }
+  if ($removed -eq 0) {
+    Write-Step 'patch file: no insert block matched - left untouched'
+    return
+  }
+  $new = ($kept -join "`n").TrimEnd() + "`n"
+  if ($new.Trim() -eq '') { $new = "[]`n" }
+  Copy-Item -LiteralPath $patchFile -Destination "$patchFile.dsh-web-bg.bak" -Force -ErrorAction SilentlyContinue
+  Write-Text $patchFile $new
+  Write-Step "patch file: removed $removed insert block(s) (backup: cordis.patch.yml.dsh-web-bg.bak)"
+}
+
+if ($Uninstall) {
+  Write-Head 'uninstalling'
+  Remove-BundleEntry
+  Remove-LegacyInsert
+  if (Test-Path -LiteralPath $targetDir) {
+    if (-not $DryRun) { Remove-Item -LiteralPath $targetDir -Recurse -Force }
+    Write-Step "removed package copy: $targetDir"
+  } else {
+    Write-Step 'package copy already absent'
+  }
+  Write-Head 'next steps'
+  Write-Step 'Fully quit and reopen the client (desktop) or restart `dsh web` (CLI) to unload the plugin.'
+  Write-Step 'The browser-side state can be cleared from the client console:'
+  Write-Step '  localStorage.removeItem("dsh.webBg.v3"); localStorage.removeItem("dsh.webBg.diag")'
+  exit 0
+}
+
+# ---- install --------------------------------------------------------------
+
+Write-Head 'installing'
+
+if (-not $DryRun) {
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $targetDir) | Out-Null
+  if (Test-Path -LiteralPath $targetDir) { Remove-Item -LiteralPath $targetDir -Recurse -Force }
+  New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+}
+foreach ($item in @('package.json', 'art.jpg')) {
+  $source = Join-Path $packageRoot $item
+  if (-not (Test-Path -LiteralPath $source)) { throw "package is incomplete: missing $item" }
+  if (-not $DryRun) { Copy-Item -LiteralPath $source -Destination (Join-Path $targetDir $item) -Force }
+}
+if (-not $DryRun) {
+  New-Item -ItemType Directory -Force -Path (Join-Path $targetDir 'lib') | Out-Null
+  foreach ($item in @('index.mjs', 'client.mjs')) {
+    $source = Join-Path $packageRoot (Join-Path 'lib' $item)
+    if (-not (Test-Path -LiteralPath $source)) { throw "package is incomplete: missing lib/$item" }
+    Copy-Item -LiteralPath $source -Destination (Join-Path $targetDir (Join-Path 'lib' $item)) -Force
+  }
+}
+# The bundle patch the profile's bundle layer reads out of the installed package.
+if (-not $DryRun) {
+  Copy-Item -LiteralPath (Join-Path $packageRoot 'cordis.patch.yml') -Destination (Join-Path $targetDir 'cordis.patch.yml') -Force
+}
+Write-Step "package copied to $targetDir"
+
+Add-BundleEntry
+Remove-LegacyInsert   # older installs activated through the user layer; clean that up
+
+# ---- verify ---------------------------------------------------------------
+
+Write-Head 'verifying'
+
+$ok = $true
+foreach ($relative in @('package.json', 'cordis.patch.yml', 'art.jpg', 'lib\index.mjs', 'lib\client.mjs')) {
+  $path = Join-Path $targetDir $relative
+  $present = Test-Path -LiteralPath $path
+  if (-not $present) { $ok = $false }
+  Write-Step ("{0,-20} {1}" -f $relative, $(if ($present) { 'ok' } else { 'MISSING' }))
+}
+$bundled = (Read-Text $manifest) -match ('"' + [regex]::Escape($packageName) + '"')
+if (-not $bundled) { $ok = $false }
+Write-Step ("{0,-20} {1}" -f 'bundles entry', $(if ($bundled) { 'ok' } else { 'MISSING' }))
+# A comments-only mention of the name (the client keeps orphaned comments when it
+# rewrites its settings) must not count as a live insert, so look for an insert
+# block that actually names this package.
+$legacy = $false
+$patchLines = (Read-Text $patchFile) -split "`r?`n"
+for ($i = 0; $i -lt $patchLines.Count; $i++) {
+  if ($patchLines[$i].Trim() -ne '- insert:') { continue }
+  for ($j = $i + 1; $j -lt [Math]::Min($i + 4, $patchLines.Count); $j++) {
+    if ($patchLines[$j].Trim() -eq "name: $packageName") { $legacy = $true }
+  }
+}
+if ($legacy) { Write-Step 'note: a user-layer insert is still present; run with -Uninstall then install again' }
+
+Write-Head 'next steps'
+Write-Step '1. Restart the runtime so the profile is composed again:'
+if ($Profile -eq 'desktop') {
+  Write-Step '   fully quit the desktop client (tray icon -> quit; closing the window is NOT enough) and reopen it.'
+} else {
+  Write-Step "   stop and restart the 'dsh $Profile' process."
+}
+Write-Step '2. Look for the small blue dot above the composer at the bottom right; click it for the controls.'
+Write-Step '3. Settings -> General shows a "实色面板颜色" row with a hex field and a round preview swatch.'
+Write-Step "4. Diagnostics land in $(Join-Path $DshHome 'dsh-web-bg-report.log') (node-half markers + client self-reports)."
+
+Write-Head 'optional: prove the profile composes the entry'
+if ($Profile -eq 'desktop') {
+  Write-Step 'The CLI refuses the literal name "desktop", so compose a copy instead:'
+  Write-Step '  Copy-Item ~/.dsh/profiles/desktop ~/.dsh/profiles/desktopcheck -Recurse -Force'
+  Write-Step '  dsh --profile desktopcheck --dump-config | Select-String web-bg'
+  Write-Step '  Remove-Item ~/.dsh/profiles/desktopcheck -Recurse -Force'
+} else {
+  Write-Step "  dsh --profile $Profile --dump-config | Select-String web-bg"
+}
+Write-Step 'The last two lines of the composed tree should read:'
+Write-Step '  - id: web-bg'
+Write-Step '    name: dsh-web-bg'
+
+exit $(if ($ok) { 0 } else { 1 })

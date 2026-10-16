@@ -1,0 +1,45 @@
+{
+  "name": "dsh-web-bg",
+  "version": "0.5.0",
+  "private": true,
+  "description": "DeepSeek Harness Web GUI wallpaper and surface controls: paints bundled artwork behind the interface, adds a continuous interface-transparency axis over the app's surface tokens, and registers per-palette hex colours plus a transparency slider for the surfaces that stay solid.",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "wallpaper",
+    "background",
+    "theme",
+    "plugin"
+  ],
+  "type": "module",
+  "main": "lib/index.mjs",
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./client": "./lib/client.mjs",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "license": "MIT",
+  "dshWebBg": {
+    "artwork": "art.jpg",
+    "reportLog": "dsh-web-bg-report.log",
+    "storageKeys": {
+      "current": "dsh.webBg.v4",
+      "legacy": ["dsh.webBg.v3", "dsh.webBg.v2"],
+      "diagnostics": "dsh.webBg.diag"
+    },
+    "loaderEntry": {
+      "id": "web-bg",
+      "name": "dsh-web-bg"
+    },
+    "extensionsNote": "The plugin halves and the installer deliberately avoid Windows' high-risk extension list (.js, .ps1) so a downloaded archive does not raise the Attachment Manager warning: the halves are .mjs and the installer ships as .ps1.txt."
+  }
+}

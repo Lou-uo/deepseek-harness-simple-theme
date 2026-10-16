@@ -1,0 +1,8 @@
+# dsh-web-bg bundle patch: inserts this plugin's public client entry into the web
+# plugin roster. Declared by package.json's `dsh.bundle.patch`, so the profile
+# composition picks the entry up from the bundle layer rather than from the
+# user's own cordis.patch.yml — the user layer is rewritten whenever the client
+# saves its settings, which would drop an insert placed there.
+- insert:
+    - id: web-bg
+      name: dsh-web-bg
