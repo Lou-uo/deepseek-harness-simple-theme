@@ -1,4 +1,4 @@
-# dsh-web-bg · DeepSeek Harness 壁纸与界面透明度插件
+# DeepSeek Harness 壁纸与界面透明度插件
 
 **给 DeepSeek Harness（DSH）的 Web GUI / 官方桌面客户端铺一张壁纸，并把界面调成你喜欢的通透程度。**
 
